@@ -10,9 +10,8 @@
  *   - 纵向加速度 ax (m/s²)
  *   - 横向加速度 ay (m/s²)
  *   - 航向角速度 r (rad/s)
- *   - 油门开度 (0-1)
- *   - 制动压力 (0-1)
- *   - 方向盘转角 (rad)
+ *   - 纵向驱动力 F_drive (N)
+ *   - 转向角度 (rad) - 可以是方向盘转角或前轮转角，由转向传动比参数决定
  * 
  * 输出:
  *   - 估计纵向速度 Vx (m/s)
@@ -31,7 +30,7 @@
 #include "ukf_estimator.h"
 
 // S-Function参数
-#define NUM_PARAMS 12
+#define NUM_PARAMS 13
 #define TRACTOR_MASS_PARAM      ssGetSFcnParam(S, 0)
 #define TRAILER_MASS_PARAM      ssGetSFcnParam(S, 1)
 #define TRACTOR_INERTIA_PARAM   ssGetSFcnParam(S, 2)
@@ -43,16 +42,16 @@
 #define FRONT_CORNERING_PARAM   ssGetSFcnParam(S, 8)
 #define REAR_CORNERING_PARAM    ssGetSFcnParam(S, 9)
 #define TRAILER_CORNERING_PARAM ssGetSFcnParam(S, 10)
-#define SAMPLE_TIME_PARAM       ssGetSFcnParam(S, 11)
+#define STEERING_RATIO_PARAM    ssGetSFcnParam(S, 11)
+#define SAMPLE_TIME_PARAM       ssGetSFcnParam(S, 12)
 
 // 输入输出端口定义
 #define INPUT_WHEEL_SPEED    0
 #define INPUT_ACC_X          1
 #define INPUT_ACC_Y          2
 #define INPUT_YAW_RATE       3
-#define INPUT_THROTTLE       4
-#define INPUT_BRAKE          5
-#define INPUT_STEERING       6
+#define INPUT_DRIVE_FORCE    4
+#define INPUT_STEER_ANGLE    5
 
 #define OUTPUT_EST_VX        0
 #define OUTPUT_EST_VY        1
@@ -84,7 +83,7 @@ static void mdlInitializeSizes(SimStruct *S)
     ssSetNumDiscStates(S, 0);
 
     if (!ssSetNumInputPorts(S, 1)) return;
-    ssSetInputPortWidth(S, 0, 7);  /* [wheel_speed, acc_x, acc_y, yaw_rate, throttle, brake, steering] */
+    ssSetInputPortWidth(S, 0, 6);  /* [wheel_speed, acc_x, acc_y, yaw_rate, drive_force, front_steer] */
     ssSetInputPortDirectFeedThrough(S, 0, 1);
 
     if (!ssSetNumOutputPorts(S, 1)) return;
@@ -198,21 +197,31 @@ static void mdlOutputs(SimStruct *S, int_T tid)
     
     // 获取输入
     const real_T *u = (const real_T*) ssGetInputPortSignal(S, 0);
-    real_T wheel_speed = u[0];
-    real_T acc_x = u[1];
-    real_T acc_y = u[2];
-    real_T yaw_rate = u[3];
-    real_T throttle = u[4];
-    real_T brake = u[5];
-    real_T steering = u[6];
+    real_T wheel_speed = u[0];      // 轮速信号 (m/s)
+    real_T acc_x = u[1];            // 纵向加速度 (m/s²)
+    real_T acc_y = u[2];            // 横向加速度 (m/s²)
+    real_T yaw_rate = u[3];         // 航向角速度 (rad/s)
+    real_T drive_force = u[4];      // 纵向驱动力 (N)
+    real_T steer_angle = u[5];      // 转向角度 (rad) - 方向盘转角或前轮转角
     
     // 获取采样时间
     real_T sample_time = mxGetPr(SAMPLE_TIME_PARAM)[0];
     
+    // 获取转向传动比参数
+    real_T steering_ratio = mxGetPr(STEERING_RATIO_PARAM)[0];
+    
     // 构建控制输入 [delta_f, F_drive]
     Eigen::VectorXd control_input(2);
-    control_input(0) = steering;  // 方向盘转角
-    control_input(1) = (throttle - brake) * 5000.0;  // 简化的驱动力
+    
+    // 转向角度处理：如果steering_ratio=1，表示输入已经是前轮转角；否则进行转换
+    // Steering angle processing: if steering_ratio=1, input is already front wheel angle; otherwise convert
+    if (steering_ratio > 0.1) {
+        control_input(0) = steer_angle / steering_ratio;  // 方向盘转角转换为前轮转角 / Convert steering wheel angle to front wheel angle
+    } else {
+        control_input(0) = steer_angle;                   // 直接使用前轮转角 / Use front wheel angle directly
+    }
+    
+    control_input(1) = drive_force;                       // 纵向驱动力 (直接使用) / Longitudinal drive force (direct use)
     
     // UKF预测步骤
     ukf->predict(control_input, sample_time);

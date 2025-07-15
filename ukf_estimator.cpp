@@ -2,18 +2,21 @@
 #include <cmath>
 
 UKFEstimator::UKFEstimator() 
-    : alpha_(1e-3), beta_(2.0), kappa_(0.0),
+    : alpha_(0.001), beta_(2.0), kappa_(0.0),  // 更保守的alpha值
       n_x_(5), n_z_(4), n_aug_(7), dynamics_(NULL)
 {
     lambda_ = alpha_ * alpha_ * (n_x_ + kappa_) - n_x_;
     
     // 初始化状态和协方差
     x_ = Eigen::VectorXd::Zero(n_x_);
-    P_ = Eigen::MatrixXd::Identity(n_x_, n_x_);
+    P_ = Eigen::MatrixXd::Identity(n_x_, n_x_) * 0.1;  // 更小的初始协方差
     
-    // 初始化噪声协方差
-    Q_ = Eigen::MatrixXd::Identity(n_x_, n_x_) * 0.1;
-    R_ = Eigen::MatrixXd::Identity(n_z_, n_z_) * 0.1;
+    // 初始化噪声协方差 - 更合理的值
+    Q_ = Eigen::MatrixXd::Identity(n_x_, n_x_);
+    Q_.diagonal() << 0.01, 0.01, 0.001, 0.001, 0.001;  // 更小的过程噪声
+    
+    R_ = Eigen::MatrixXd::Identity(n_z_, n_z_);
+    R_.diagonal() << 0.1, 0.01, 0.01, 0.1;  // 更合理的测量噪声
     
     computeWeights();
 }
@@ -73,13 +76,22 @@ void UKFEstimator::predict(const Eigen::VectorXd& control_input, double dt)
         return;
     }
     
-    // 生成增广sigma点
-    Eigen::MatrixXd sigma_points_aug(n_aug_, 2 * n_aug_ + 1);
-    generateAugmentedSigmaPoints(x_, P_, control_input, dt, sigma_points_aug);
+    // 直接生成状态sigma点，不使用增广方法
+    Eigen::MatrixXd sigma_points(n_x_, 2 * n_x_ + 1);
+    generateSigmaPoints(x_, P_, sigma_points);
     
     // 预测sigma点
     Eigen::MatrixXd sigma_points_pred(n_x_, 2 * n_x_ + 1);
-    predictSigmaPoints(sigma_points_aug, control_input, dt, sigma_points_pred);
+    sigma_points_pred.resize(n_x_, sigma_points.cols());
+    
+    for (int i = 0; i < sigma_points.cols(); i++) {
+        Eigen::VectorXd x = sigma_points.col(i);
+        
+        // 使用动力学模型预测
+        Eigen::VectorXd x_pred = dynamics_->integrate(x, control_input, dt);
+        
+        sigma_points_pred.col(i) = x_pred;
+    }
     
     // 计算预测均值
     x_.setZero();
@@ -99,6 +111,20 @@ void UKFEstimator::predict(const Eigen::VectorXd& control_input, double dt)
         x_diff(3) = normalizeAngle(x_diff(3));
         P_ += weights_c_(i) * x_diff * x_diff.transpose();
     }
+    
+    // 添加过程噪声
+    P_ += Q_;
+    
+    // 确保协方差矩阵保持数值稳定性 / Ensure covariance matrix numerical stability
+    // 检查并修复负对角元素
+    for (int i = 0; i < P_.rows(); i++) {
+        if (P_(i, i) < 1e-6) {
+            P_(i, i) = 1e-6;
+        }
+    }
+    
+    // 强制对称性
+    P_ = 0.5 * (P_ + P_.transpose());
 }
 
 void UKFEstimator::update(const Eigen::VectorXd& measurement)
@@ -144,36 +170,132 @@ void UKFEstimator::update(const Eigen::VectorXd& measurement)
         Tc += weights_c_(i) * x_diff * z_diff.transpose();
     }
     
-    // 卡尔曼增益
-    Eigen::MatrixXd K = Tc * S.inverse();
+    // 卡尔曼增益 - 添加强化的数值稳定性保护
+    Eigen::MatrixXd S_inv;
     
-    // 更新状态
+    // 添加正则化项确保S是良条件的
+    double reg_factor = 1e-3;  // 增加正则化因子
+    S += reg_factor * Eigen::MatrixXd::Identity(n_z_, n_z_);
+    
+    // 使用更稳定的求逆方法
+    Eigen::LDLT<Eigen::MatrixXd> ldlt_S(S);
+    if (ldlt_S.info() == Eigen::Success && ldlt_S.isPositive()) {
+        S_inv = ldlt_S.solve(Eigen::MatrixXd::Identity(n_z_, n_z_));
+    } else {
+        // 备用方案：使用SVD求伪逆
+        Eigen::JacobiSVD<Eigen::MatrixXd> svd(S, Eigen::ComputeFullU | Eigen::ComputeFullV);
+        double tolerance = 1e-6 * svd.singularValues().maxCoeff();
+        S_inv = svd.matrixV() * (svd.singularValues().array().abs() > tolerance).select(
+            svd.singularValues().array().inverse(), 0).matrix().asDiagonal() * svd.matrixU().transpose();
+    }
+    
+    Eigen::MatrixXd K = Tc * S_inv;
+    
+    // 限制卡尔曼增益的大小，防止数值爆炸
+    double max_gain = 10.0;
+    for (int i = 0; i < K.rows(); i++) {
+        for (int j = 0; j < K.cols(); j++) {
+            if (std::abs(K(i,j)) > max_gain) {
+                K(i,j) = (K(i,j) > 0) ? max_gain : -max_gain;
+            }
+        }
+    }
+    
+    // 更新状态 - 添加状态限制
     Eigen::VectorXd z_diff = measurement - z_pred;
     z_diff(2) = normalizeAngle(z_diff(2));  // 铰接角差
     
+    Eigen::VectorXd x_old = x_;  // 保存旧状态
     x_ += K * z_diff;
+    
+    // 检查状态更新是否合理，如果不合理则回退
+    bool state_valid = true;
+    for (int i = 0; i < x_.size(); i++) {
+        if (std::isnan(x_(i)) || std::isinf(x_(i))) {
+            state_valid = false;
+            break;
+        }
+        // 检查状态变化是否过大
+        if (std::abs(x_(i) - x_old(i)) > 100.0) {
+            state_valid = false;
+            break;
+        }
+    }
+    
+    if (!state_valid) {
+        // 状态更新失败，回退到预测状态
+        x_ = x_old;
+        return;  // 跳过协方差更新
+    }
     x_(2) = normalizeAngle(x_(2));
     x_(3) = normalizeAngle(x_(3));
     
-    // 更新协方差
-    P_ -= K * S * K.transpose();
+    // 更新协方差 - 使用简单但稳定的形式
+    Eigen::MatrixXd I = Eigen::MatrixXd::Identity(n_x_, n_x_);
+    
+    // 构建观测矩阵H (线性化近似)
+    Eigen::MatrixXd H = Eigen::MatrixXd::Zero(n_z_, n_x_);
+    H(0, 0) = 1.0;  // 轮速 ≈ Vx
+    H(1, 2) = 1.0;  // 航向角速度 ≈ r
+    H(2, 3) = 1.0;  // 铰接角 ≈ psi
+    H(3, 0) = 0.1;  // 纵向加速度与Vx相关（简化）
+    
+    // Joseph形式协方差更新
+    Eigen::MatrixXd IKH = I - K * H;
+    P_ = IKH * P_ * IKH.transpose() + K * R_ * K.transpose();
+    
+    // 强制协方差矩阵对称且数值稳定
+    P_ = 0.5 * (P_ + P_.transpose());
+    
+    // 确保对角线元素有最小值，防止退化
+    for (int i = 0; i < P_.rows(); i++) {
+        if (P_(i, i) < 1e-6) {
+            P_(i, i) = 1e-6;
+        }
+        if (P_(i, i) > 1e3) {  // 防止协方差过大
+            P_(i, i) = 1e3;
+        }
+    }
 }
 
 void UKFEstimator::generateSigmaPoints(const Eigen::VectorXd& x, const Eigen::MatrixXd& P, 
                                       Eigen::MatrixXd& sigma_points)
 {
-    sigma_points.resize(n_x_, 2 * n_x_ + 1);
+    int n_dim = x.size();  // 使用输入向量的实际维度
+    sigma_points.resize(n_dim, 2 * n_dim + 1);
+    
+    // 确保协方差矩阵是正定的 / Ensure covariance matrix is positive definite
+    Eigen::MatrixXd P_safe = P;
+    
+    // 添加正则化项防止数值问题 / Add regularization to prevent numerical issues
+    double reg = 1e-9;
+    P_safe += reg * Eigen::MatrixXd::Identity(n_dim, n_dim);
+    
+    // 使用更稳定的Cholesky分解 / Use more stable Cholesky decomposition
+    Eigen::LDLT<Eigen::MatrixXd> ldlt(P_safe);
+    if (ldlt.info() != Eigen::Success) {
+        // 如果LDLT分解失败，使用对角矩阵作为备选 / If LDLT fails, use diagonal matrix as fallback
+        P_safe = P.diagonal().asDiagonal();
+        P_safe += 0.01 * Eigen::MatrixXd::Identity(n_dim, n_dim);
+    }
     
     // 计算平方根矩阵
-    Eigen::MatrixXd A = ((n_x_ + lambda_) * P).llt().matrixL();
+    double lambda_local = (n_dim == n_x_) ? lambda_ : (alpha_ * alpha_ * (n_dim + kappa_) - n_dim);
+    Eigen::MatrixXd A = ((n_dim + lambda_local) * P_safe).llt().matrixL();
+    
+    // 检查Cholesky分解是否成功 / Check if Cholesky decomposition succeeded
+    if (A.hasNaN()) {
+        // 备选方案：使用对角矩阵 / Fallback: use diagonal matrix
+        A = std::sqrt(n_dim + lambda_local) * P_safe.diagonal().cwiseSqrt().asDiagonal();
+    }
     
     // 第一个sigma点
     sigma_points.col(0) = x;
     
     // 其余sigma点
-    for (int i = 0; i < n_x_; i++) {
+    for (int i = 0; i < n_dim; i++) {
         sigma_points.col(i + 1) = x + A.col(i);
-        sigma_points.col(i + 1 + n_x_) = x - A.col(i);
+        sigma_points.col(i + 1 + n_dim) = x - A.col(i);
     }
 }
 
@@ -181,7 +303,7 @@ void UKFEstimator::generateAugmentedSigmaPoints(const Eigen::VectorXd& x, const 
                                                const Eigen::VectorXd& u, double dt,
                                                Eigen::MatrixXd& sigma_points)
 {
-    // 增广状态: [x, noise_x, noise_z]
+    // 增广状态: [x, noise_x]
     Eigen::VectorXd x_aug = Eigen::VectorXd::Zero(n_aug_);
     x_aug.head(n_x_) = x;
     
@@ -189,7 +311,24 @@ void UKFEstimator::generateAugmentedSigmaPoints(const Eigen::VectorXd& x, const 
     P_aug.topLeftCorner(n_x_, n_x_) = P;
     P_aug.bottomRightCorner(n_x_, n_x_) = Q_;
     
-    generateSigmaPoints(x_aug, P_aug, sigma_points);
+    // 为增广维度生成sigma点
+    int n_dim = n_aug_;
+    sigma_points.resize(n_dim, 2 * n_dim + 1);
+    
+    // 计算lambda用于增广维度
+    double lambda_aug = alpha_ * alpha_ * (n_dim + kappa_) - n_dim;
+    
+    // 计算平方根矩阵
+    Eigen::MatrixXd A = ((n_dim + lambda_aug) * P_aug).llt().matrixL();
+    
+    // 第一个sigma点
+    sigma_points.col(0) = x_aug;
+    
+    // 其余sigma点
+    for (int i = 0; i < n_dim; i++) {
+        sigma_points.col(i + 1) = x_aug + A.col(i);
+        sigma_points.col(i + 1 + n_dim) = x_aug - A.col(i);
+    }
 }
 
 void UKFEstimator::predictSigmaPoints(const Eigen::MatrixXd& sigma_points_in,

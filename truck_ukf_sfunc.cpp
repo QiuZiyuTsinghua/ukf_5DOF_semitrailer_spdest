@@ -74,9 +74,16 @@
 static void mdlInitializeSizes(SimStruct *S)
 {
     ssSetNumSFcnParams(S, NUM_PARAMS);  /* Number of expected parameters */
+    
+    // 更宽松的参数检查 - 允许参数数量不匹配时继续运行
+    // More lenient parameter check - allow execution even if parameter count doesn't match
     if (ssGetNumSFcnParams(S) != ssGetSFcnParamsCount(S)) {
-        /* Return if number of expected != number of actual parameters */
-        return;
+        // 只是发出警告，不直接返回
+        // Just warn, don't return directly
+        char msg[256];
+        sprintf(msg, "Expected %d parameters but got %d. Using default values.", 
+                NUM_PARAMS, ssGetSFcnParamsCount(S));
+        ssWarning(S, msg);
     }
 
     ssSetNumContStates(S, 0);
@@ -110,7 +117,16 @@ static void mdlInitializeSizes(SimStruct *S)
  */
 static void mdlInitializeSampleTimes(SimStruct *S)
 {
-    real_T sample_time = mxGetPr(SAMPLE_TIME_PARAM)[0];
+    // 检查参数是否有效，如果无效则使用默认采样时间
+    real_T sample_time = 0.01;  // 默认10ms采样时间
+    
+    if (ssGetSFcnParamsCount(S) >= NUM_PARAMS && mxGetPr(SAMPLE_TIME_PARAM) != NULL) {
+        real_T param_sample_time = mxGetPr(SAMPLE_TIME_PARAM)[0];
+        if (param_sample_time > 0.0 && param_sample_time < 1.0) {  // 合理范围检查
+            sample_time = param_sample_time;
+        }
+    }
+    
     ssSetSampleTime(S, 0, sample_time);
     ssSetOffsetTime(S, 0, 0.0);
 }
@@ -130,21 +146,56 @@ static void mdlInitializeSampleTimes(SimStruct *S)
  */
 static void mdlInitializeConditions(SimStruct *S)
 {
+    // 更宽松的参数检查 - 使用默认值处理参数不足的情况
+    // More lenient parameter check - use default values when parameters are insufficient
+    int actual_params = ssGetSFcnParamsCount(S);
+    if (actual_params != NUM_PARAMS) {
+        char msg[256];
+        sprintf(msg, "Using default parameters. Expected %d but got %d parameters.", NUM_PARAMS, actual_params);
+        ssWarning(S, msg);
+    }
+    
     // 创建车辆动力学模型
     SemitrailerDynamics* dynamics = new SemitrailerDynamics();
     
-    // 设置车辆参数
-    real_T mt = mxGetPr(TRACTOR_MASS_PARAM)[0];
-    real_T ms = mxGetPr(TRAILER_MASS_PARAM)[0];
-    real_T Izt = mxGetPr(TRACTOR_INERTIA_PARAM)[0];
-    real_T Izs = mxGetPr(TRAILER_INERTIA_PARAM)[0];
-    real_T a = mxGetPr(FRONT_AXLE_PARAM)[0];
-    real_T bt = mxGetPr(REAR_AXLE_PARAM)[0];
-    real_T bs = mxGetPr(TRAILER_AXLE_PARAM)[0];
-    real_T Lh = mxGetPr(HITCH_DISTANCE_PARAM)[0];
-    real_T Caf = mxGetPr(FRONT_CORNERING_PARAM)[0];
-    real_T Car = mxGetPr(REAR_CORNERING_PARAM)[0];
-    real_T Cas = mxGetPr(TRAILER_CORNERING_PARAM)[0];
+    // 设置车辆参数 - 使用默认值，如果参数可用则使用参数值
+    // Set vehicle parameters - use defaults, override with parameter values if available
+    real_T mt = 8000.0;   // 默认牵引车质量
+    real_T ms = 25000.0;  // 默认半挂车质量
+    real_T Izt = 5000.0;  // 默认牵引车转动惯量
+    real_T Izs = 30000.0; // 默认半挂车转动惯量
+    real_T a = 1.4;       // 默认前轴距质心距离
+    real_T bt = 2.8;      // 默认牵引车后轴距质心距离
+    real_T bs = 7.0;      // 默认半挂车轴距质心距离
+    real_T Lh = 0.8;      // 默认铰接点距牵引车质心距离
+    real_T Caf = 180000.0; // 默认前轮胎侧偏刚度
+    real_T Car = 300000.0; // 默认牵引车后轮胎侧偏刚度
+    real_T Cas = 400000.0; // 默认半挂车轮胎侧偏刚度
+    
+    // 如果参数可用，使用参数值覆盖默认值
+    // Override defaults with parameter values if available
+    if (actual_params >= 1 && mxGetPr(TRACTOR_MASS_PARAM) != NULL) 
+        mt = mxGetPr(TRACTOR_MASS_PARAM)[0];
+    if (actual_params >= 2 && mxGetPr(TRAILER_MASS_PARAM) != NULL) 
+        ms = mxGetPr(TRAILER_MASS_PARAM)[0];
+    if (actual_params >= 3 && mxGetPr(TRACTOR_INERTIA_PARAM) != NULL) 
+        Izt = mxGetPr(TRACTOR_INERTIA_PARAM)[0];
+    if (actual_params >= 4 && mxGetPr(TRAILER_INERTIA_PARAM) != NULL) 
+        Izs = mxGetPr(TRAILER_INERTIA_PARAM)[0];
+    if (actual_params >= 5 && mxGetPr(FRONT_AXLE_PARAM) != NULL) 
+        a = mxGetPr(FRONT_AXLE_PARAM)[0];
+    if (actual_params >= 6 && mxGetPr(REAR_AXLE_PARAM) != NULL) 
+        bt = mxGetPr(REAR_AXLE_PARAM)[0];
+    if (actual_params >= 7 && mxGetPr(TRAILER_AXLE_PARAM) != NULL) 
+        bs = mxGetPr(TRAILER_AXLE_PARAM)[0];
+    if (actual_params >= 8 && mxGetPr(HITCH_DISTANCE_PARAM) != NULL) 
+        Lh = mxGetPr(HITCH_DISTANCE_PARAM)[0];
+    if (actual_params >= 9 && mxGetPr(FRONT_CORNERING_PARAM) != NULL) 
+        Caf = mxGetPr(FRONT_CORNERING_PARAM)[0];
+    if (actual_params >= 10 && mxGetPr(REAR_CORNERING_PARAM) != NULL) 
+        Car = mxGetPr(REAR_CORNERING_PARAM)[0];
+    if (actual_params >= 11 && mxGetPr(TRAILER_CORNERING_PARAM) != NULL) 
+        Cas = mxGetPr(TRAILER_CORNERING_PARAM)[0];
     
     dynamics->setVehicleParameters(mt, ms, Izt, Izs, a, bt, bs, Lh, Caf, Car, Cas);
     dynamics->setHitchParameters(1000.0, 5000.0);  // 铰接刚度和阻尼
@@ -197,6 +248,15 @@ static void mdlOutputs(SimStruct *S, int_T tid)
     
     // 获取输入
     const real_T *u = (const real_T*) ssGetInputPortSignal(S, 0);
+    if (u == NULL) {
+        // 如果没有输入信号，使用默认值
+        real_T *y = ssGetOutputPortRealSignal(S, 0);
+        for (int i = 0; i < 6; i++) {
+            y[i] = 0.0;  // 输出零值
+        }
+        return;
+    }
+    
     real_T wheel_speed = u[0];      // 轮速信号 (m/s)
     real_T acc_x = u[1];            // 纵向加速度 (m/s²)
     real_T acc_y = u[2];            // 横向加速度 (m/s²)
@@ -204,11 +264,21 @@ static void mdlOutputs(SimStruct *S, int_T tid)
     real_T drive_force = u[4];      // 纵向驱动力 (N)
     real_T steer_angle = u[5];      // 转向角度 (rad) - 方向盘转角或前轮转角
     
-    // 获取采样时间
-    real_T sample_time = mxGetPr(SAMPLE_TIME_PARAM)[0];
+    // 获取采样时间 - 使用默认值以防参数无效
+    real_T sample_time = 0.01;  // 默认10ms
+    int actual_params = ssGetSFcnParamsCount(S);
+    if (actual_params >= 13 && mxGetPr(SAMPLE_TIME_PARAM) != NULL) {
+        real_T param_sample_time = mxGetPr(SAMPLE_TIME_PARAM)[0];
+        if (param_sample_time > 0.0 && param_sample_time < 1.0) {
+            sample_time = param_sample_time;
+        }
+    }
     
     // 获取转向传动比参数
-    real_T steering_ratio = mxGetPr(STEERING_RATIO_PARAM)[0];
+    real_T steering_ratio = 1.0;  // 默认值
+    if (actual_params >= 12 && mxGetPr(STEERING_RATIO_PARAM) != NULL) {
+        steering_ratio = mxGetPr(STEERING_RATIO_PARAM)[0];
+    }
     
     // 构建控制输入 [delta_f, F_drive]
     Eigen::VectorXd control_input(2);

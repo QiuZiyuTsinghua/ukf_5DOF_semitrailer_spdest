@@ -4,6 +4,10 @@
 #include <Eigen/Dense>
 #include "semitrailer_dynamics.h"
 
+#ifndef M_PI
+const double M_PI = 3.14159265358979323846;
+#endif
+
 /**
  * Unscented Kalman Filter for Semitrailer State Estimation
  * 使用Merwe scaled sigma-points方法

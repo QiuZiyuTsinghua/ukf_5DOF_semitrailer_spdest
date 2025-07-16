@@ -307,8 +307,8 @@ int main()
     std::cout << "\n3. 开始仿真测试..." << std::endl;
     std::cout << "3. Starting simulation test..." << std::endl;
     
-    double dt = 0.01;           // 时间步长 10ms / Time step 10ms
-    int num_steps = 20;         // 减少到20步便于调试 / Reduce to 20 steps for debugging
+    double dt = 0.001;          // 时间步长 1ms / Time step 1ms
+    int num_steps = 200;        // 增加到200步以保持合理的仿真时长 / Increase to 200 steps for reasonable simulation duration
     double steering_amplitude = 0.01;  // 减小转向幅度 / Reduce steering amplitude
     double steering_frequency = 0.1;   // 减小转向频率 / Reduce steering frequency
     

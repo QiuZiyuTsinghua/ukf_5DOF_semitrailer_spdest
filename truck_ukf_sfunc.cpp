@@ -118,7 +118,7 @@ static void mdlInitializeSizes(SimStruct *S)
 static void mdlInitializeSampleTimes(SimStruct *S)
 {
     // 检查参数是否有效，如果无效则使用默认采样时间
-    real_T sample_time = 0.01;  // 默认10ms采样时间
+    real_T sample_time = 0.001;  // 默认1ms采样时间
     
     if (ssGetSFcnParamsCount(S) >= NUM_PARAMS && mxGetPr(SAMPLE_TIME_PARAM) != NULL) {
         real_T param_sample_time = mxGetPr(SAMPLE_TIME_PARAM)[0];
@@ -265,7 +265,7 @@ static void mdlOutputs(SimStruct *S, int_T tid)
     real_T steer_angle = u[5];      // 转向角度 (rad) - 方向盘转角或前轮转角
     
     // 获取采样时间 - 使用默认值以防参数无效
-    real_T sample_time = 0.01;  // 默认10ms
+    real_T sample_time = 0.001;  // 默认1ms
     int actual_params = ssGetSFcnParamsCount(S);
     if (actual_params >= 13 && mxGetPr(SAMPLE_TIME_PARAM) != NULL) {
         real_T param_sample_time = mxGetPr(SAMPLE_TIME_PARAM)[0];

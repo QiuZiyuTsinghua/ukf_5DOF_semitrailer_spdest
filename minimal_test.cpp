@@ -61,7 +61,7 @@ int main()
     measurement << 0.1, 0.0, 0.0, 0.0;  // 接近初始状态的测量
     
     std::cout << "\n执行预测步骤..." << std::endl;
-    ukf.predict(control_input, 0.01);
+    ukf.predict(control_input, 0.001);
     
     Eigen::VectorXd state_after_predict = ukf.getState();
     std::cout << "预测后状态: [";

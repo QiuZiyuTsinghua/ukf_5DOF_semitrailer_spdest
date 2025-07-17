@@ -1,4 +1,4 @@
-#include "semitrailer_dynamics.h"
+#include "../include/semitrailer_dynamics.h"
 #include <cmath>
 #include <algorithm>
 

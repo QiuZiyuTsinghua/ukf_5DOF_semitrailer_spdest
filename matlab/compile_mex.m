@@ -16,7 +16,7 @@ EIGEN_INCLUDE_PATH = 'C:\Users\ziyu.qiu\Documents\lib\eigen-3.4.0';
 
 % 编译MEX文件
 try
-    mex(['-I' EIGEN_INCLUDE_PATH], 'truck_ukf_sfunc.cpp', 'semitrailer_dynamics.cpp', 'ukf_estimator.cpp')
+    mex(['-I' EIGEN_INCLUDE_PATH], '-I../include', '../src/truck_ukf_sfunc.cpp', '../src/semitrailer_dynamics.cpp', '../src/ukf_estimator.cpp')
     fprintf('编译成功! 生成了 truck_ukf_sfunc.%s\n', mexext);
 catch ME
     fprintf('编译失败: %s\n', ME.message);

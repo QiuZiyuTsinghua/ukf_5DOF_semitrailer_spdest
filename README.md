@@ -1,30 +1,70 @@
-# UKF MEX 模块编译说明
+# UKF半挂卡车状态估计器
 
-## 在Windows上编译MEX模块
+## 项目简介
 
-### 方法1: 使用MATLAB脚本 (推荐)
-1. 将所有文件复制到Windows电脑上
-2. 打开MATLAB
-3. 切换到包含这些文件的目录
-4. 运行: `compile_mex`
+本项目实现了基于无迹卡尔曼滤波（UKF）的半挂卡车5自由度状态估计器，支持C++独立运行和MATLAB/Simulink集成。
 
-### 方法2: 使用批处理文件
-1. 将所有文件复制到Windows电脑上
-2. 双击运行 `compile_mex.bat`
+## 目录结构
 
-### 方法3: 直接在MATLAB命令行
+```
+ukf_simple/
+├── include/           # 头文件
+├── src/              # 源代码
+├── tests/            # 测试程序  
+├── matlab/           # MATLAB集成
+├── docs/             # 技术文档
+├── build/            # 编译输出
+└── Makefile          # 构建文件
+```
+
+详细结构说明请参考 `PROJECT_STRUCTURE_NEW.md`
+
+## 快速开始
+
+### C++测试程序编译与运行
+
+```bash
+# 编译主测试程序
+make
+
+# 运行测试
+make run
+
+# 编译所有测试程序
+make all-tests
+
+# 运行不同的测试
+make run-simple    # 简化测试
+make run-minimal   # 最小测试
+```
+
+### MATLAB MEX模块编译
+
+#### 在Windows上编译MEX模块
+
+**方法1: 使用MATLAB脚本 (推荐)**
+1. 将项目文件复制到Windows电脑上
+2. 打开MATLAB，切换到项目根目录
+3. 运行: `cd matlab; compile_mex`
+
+**方法2: 使用批处理文件**
+1. 双击运行 `matlab/compile_mex.bat`
+
+**方法3: 直接在MATLAB命令行**
 ```matlab
-mex truck_ukf_sfunc.cpp semitrailer_dynamics.cpp ukf_estimator.cpp
+cd matlab
+mex -I../include ../src/truck_ukf_sfunc.cpp ../src/semitrailer_dynamics.cpp ../src/ukf_estimator.cpp
 ```
 
 ### 编译要求
 - MATLAB R2015b或更高版本
 - 配置好的C++编译器 (Visual Studio或MinGW)
+- Eigen3库（路径需在compile_mex.m中配置）
 
 ### 编译成功后
 会生成 `truck_ukf_sfunc.mexw64` (64位Windows) 或 `truck_ukf_sfunc.mexw32` (32位Windows)
 
-## 使用MEX模块
+## MATLAB/Simulink集成使用
 
 ### 在Simulink中使用
 1. 打开Simulink模型

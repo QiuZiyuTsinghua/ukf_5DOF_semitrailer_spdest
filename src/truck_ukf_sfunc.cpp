@@ -26,8 +26,8 @@
 #define S_FUNCTION_LEVEL 2
 
 #include "simstruc.h"
-#include "semitrailer_dynamics.h"
-#include "ukf_estimator.h"
+#include "../include/semitrailer_dynamics.h"
+#include "../include/ukf_estimator.h"
 
 // S-Function参数
 #define NUM_PARAMS 13

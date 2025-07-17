@@ -10,8 +10,8 @@
 #include <chrono>
 #include <csignal>
 #include <csetjmp>
-#include "semitrailer_dynamics.h"
-#include "ukf_estimator.h"
+#include "../include/semitrailer_dynamics.h"
+#include "../include/ukf_estimator.h"
 
 // 全局超时控制
 volatile bool timeout_flag = false;
